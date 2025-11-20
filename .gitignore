@@ -1,0 +1,14 @@
+node_modules/
+.next/
+out/
+build/
+dist/
+*.log
+.env
+.env.local
+.env.*.local
+.DS_Store
+email_stats.db
+email_stats.db-*
+uploads/
+.vercel
