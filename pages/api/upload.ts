@@ -1,11 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { writeFile, mkdir } from 'fs/promises';
-import { join } from 'path';
-import { parseCSVFile } from '@/lib/csvParser';
+import { parseCSVString } from '@/lib/csvParser';
 import { initializeDatabase, runQuerySingle, executeQuery, runQuery } from '@/lib/db';
-import { existsSync } from 'fs';
-
-const uploadDir = join(process.cwd(), 'uploads');
 
 export const config = {
   api: {
@@ -45,18 +40,12 @@ export default async function handler(
       return res.status(400).json({ error: 'File and filename are required' });
     }
 
-    // Create uploads directory if it doesn't exist
-    if (!existsSync(uploadDir)) {
-      await mkdir(uploadDir, { recursive: true });
-    }
-
-    // Write file to disk
-    const filePath = join(uploadDir, filename);
+    // Decode base64 directly (no file writing needed for Vercel)
     const buffer = Buffer.from(file, 'base64');
-    await writeFile(filePath, buffer);
+    const csvContent = buffer.toString('utf-8');
 
-    // Parse CSV
-    const stats = parseCSVFile(filePath);
+    // Parse CSV directly from content
+    const stats = parseCSVString(csvContent, filename);
     console.log(`Upload API - Received ${stats.length} records from ${filename}`);
 
     if (stats.length === 0) {

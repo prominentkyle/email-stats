@@ -40,9 +40,8 @@ function parseCSVLine(line: string): string[] {
   return result;
 }
 
-export function parseCSVFile(filePath: string): UserDailyStats[] {
-  const fileContent = fs.readFileSync(filePath, 'utf-8');
-  const lines = fileContent.split('\n').filter(line => line.trim());
+function parseCSVContent(content: string, dateSource: string = ''): UserDailyStats[] {
+  const lines = content.split('\n').filter(line => line.trim());
 
   if (lines.length < 2) {
     return [];
@@ -86,10 +85,9 @@ export function parseCSVFile(filePath: string): UserDailyStats[] {
     }
   }
 
-  // Fallback: if no date found in headers, extract from filename
+  // Fallback: if no date found in headers, extract from filename or use today
   if (!dateStr) {
-    const fileName = filePath.split('/').pop() || '';
-    const match = fileName.match(/users_logs_(\d+)/);
+    const match = dateSource.match(/users_logs_(\d+)/);
     if (match) {
       const timestamp = parseInt(match[1]);
       dateStr = new Date(timestamp).toISOString().split('T')[0];
@@ -122,8 +120,18 @@ export function parseCSVFile(filePath: string): UserDailyStats[] {
     });
   }
 
-  console.log(`CSV Parser - Parsed ${results.length} records from ${filePath}`);
+  console.log(`CSV Parser - Parsed ${results.length} records`);
   return results;
+}
+
+export function parseCSVFile(filePath: string): UserDailyStats[] {
+  const fileContent = fs.readFileSync(filePath, 'utf-8');
+  const fileName = filePath.split('/').pop() || '';
+  return parseCSVContent(fileContent, fileName);
+}
+
+export function parseCSVString(content: string, filename: string = ''): UserDailyStats[] {
+  return parseCSVContent(content, filename);
 }
 
 export function extractDateFromCSV(content: string): string {
