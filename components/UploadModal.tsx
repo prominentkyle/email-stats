@@ -27,42 +27,56 @@ export default function UploadModal({ onClose, onSuccess }: UploadModalProps) {
     try {
       const reader = new FileReader();
       reader.onload = async (event) => {
-        const fileContent = event.target?.result as string;
-        const base64File = Buffer.from(fileContent).toString('base64');
+        try {
+          const fileContent = event.target?.result as string;
 
-        const response = await fetch('/api/upload', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            file: base64File,
-            filename: file.name,
-          }),
-        });
+          // Convert string to base64 using browser API
+          const base64File = btoa(unescape(encodeURIComponent(fileContent)));
 
-        const data = await response.json();
+          const response = await fetch('/api/upload', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              file: base64File,
+              filename: file.name,
+            }),
+          });
 
-        if (!response.ok) {
-          setError(data.error || 'Upload failed');
-          return;
+          const data = await response.json();
+
+          if (!response.ok) {
+            setError(data.details || data.error || 'Upload failed');
+            setUploading(false);
+            return;
+          }
+
+          setSuccess(
+            `✅ Successfully processed ${data.insertedCount} records from ${file.name}`
+          );
+
+          setTimeout(() => {
+            setUploading(false);
+            onSuccess();
+          }, 1500);
+        } catch (err) {
+          setError('Failed to process file');
+          setUploading(false);
+          console.error(err);
         }
+      };
 
-        setSuccess(
-          `✅ Successfully processed ${data.insertedCount} records from ${file.name}`
-        );
-
-        setTimeout(() => {
-          onSuccess();
-        }, 1500);
+      reader.onerror = () => {
+        setError('Failed to read file');
+        setUploading(false);
       };
 
       reader.readAsText(file);
     } catch (err) {
       setError('Failed to upload file');
-      console.error(err);
-    } finally {
       setUploading(false);
+      console.error(err);
     }
   };
 
