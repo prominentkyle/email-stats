@@ -205,7 +205,9 @@ async function runQueryPostgres<T>(sql_query: string, params: any[]): Promise<T[
   if (!pool) throw new Error('Postgres pool not initialized');
 
   try {
-    const result = await pool.query(sql_query, params);
+    // Convert SQLite ? placeholders to Postgres $1, $2, etc
+    const pgQuery = convertPlaceholders(sql_query);
+    const result = await pool.query(pgQuery, params);
     return result.rows as T[];
   } catch (error) {
     console.error('PostgreSQL query error:', error);
@@ -238,7 +240,8 @@ async function runQuerySinglePostgres<T>(sql_query: string, params: any[]): Prom
   if (!pool) throw new Error('Postgres pool not initialized');
 
   try {
-    const result = await pool.query(sql_query, params);
+    const pgQuery = convertPlaceholders(sql_query);
+    const result = await pool.query(pgQuery, params);
     return (result.rows[0] as T) || null;
   } catch (error) {
     console.error('PostgreSQL query error:', error);
@@ -277,12 +280,45 @@ async function executeQueryPostgres(
   if (!pool) throw new Error('Postgres pool not initialized');
 
   try {
-    const result = await pool.query(sql_query, params);
+    const pgQuery = convertPlaceholders(sql_query);
+    const result = await pool.query(pgQuery, params);
     return { lastID: 0, changes: result.rowCount || 0 };
   } catch (error) {
     console.error('PostgreSQL execute error:', error);
     throw error;
   }
+}
+
+// Helper function to convert SQLite ? placeholders to Postgres $1, $2, etc
+function convertPlaceholders(sql: string): string {
+  let paramIndex = 1;
+  let result = '';
+  let inString = false;
+  let stringChar = '';
+
+  for (let i = 0; i < sql.length; i++) {
+    const char = sql[i];
+
+    // Track if we're inside a string literal
+    if ((char === "'" || char === '"') && (i === 0 || sql[i - 1] !== '\\')) {
+      if (!inString) {
+        inString = true;
+        stringChar = char;
+      } else if (char === stringChar) {
+        inString = false;
+      }
+    }
+
+    // Replace ? with $N only if we're not in a string literal
+    if (char === '?' && !inString) {
+      result += `$${paramIndex}`;
+      paramIndex++;
+    } else {
+      result += char;
+    }
+  }
+
+  return result;
 }
 
 function executeQuerySQLite(
