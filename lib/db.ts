@@ -1,10 +1,22 @@
-import { sql } from '@vercel/postgres';
 import sqlite3 from 'sqlite3';
 import path from 'path';
 import fs from 'fs';
 
-// Check if we're using Vercel Postgres (on Vercel) or SQLite (locally)
-const isVercel = process.env.POSTGRES_PRISMA_URL || process.env.VERCEL;
+let sql: any = null;
+
+// Try to import Vercel Postgres only if the connection string exists
+const hasPostgresUrl = process.env.POSTGRES_PRISMA_URL || process.env.POSTGRES_URL;
+if (hasPostgresUrl) {
+  try {
+    const { sql: vercelSql } = require('@vercel/postgres');
+    sql = vercelSql;
+  } catch (error) {
+    console.warn('Vercel Postgres not available, falling back to SQLite');
+  }
+}
+
+// Use Postgres only if connection string exists AND module loaded successfully
+const isVercel = hasPostgresUrl && sql !== null;
 
 let sqliteDb: sqlite3.Database | null = null;
 
