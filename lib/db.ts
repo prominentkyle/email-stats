@@ -1,27 +1,36 @@
+import { Pool, Client } from 'pg';
 import sqlite3 from 'sqlite3';
 import path from 'path';
 import fs from 'fs';
 
-let sql: any = null;
+// Check if we have a Postgres connection string (Neon or any Postgres provider)
+const postgresUrl = process.env.POSTGRES_URL || process.env.POSTGRES_PRISMA_URL || process.env.DATABASE_URL;
+let pool: Pool | null = null;
 
-// Try to import Vercel Postgres only if the connection string exists
-const hasPostgresUrl = process.env.POSTGRES_PRISMA_URL || process.env.POSTGRES_URL;
-if (hasPostgresUrl) {
+// Clean up connection string if it has extra quotes or psql prefix
+let cleanConnectionString = postgresUrl;
+if (cleanConnectionString) {
+  // Remove psql prefix if present (e.g., "psql 'postgresql://...")
+  cleanConnectionString = cleanConnectionString.replace(/^psql\s+['"]/, '').replace(/['"]$/, '');
+
   try {
-    const { sql: vercelSql } = require('@vercel/postgres');
-    sql = vercelSql;
+    pool = new Pool({
+      connectionString: cleanConnectionString,
+      max: 5, // Limit connections for serverless
+    });
+    console.log('Connected to Postgres');
   } catch (error) {
-    console.warn('Vercel Postgres not available, falling back to SQLite');
+    console.warn('Failed to connect to Postgres:', error);
+    pool = null;
   }
 }
 
-// Use Postgres only if connection string exists AND module loaded successfully
-const isVercel = hasPostgresUrl && sql !== null;
+const isPostgres = pool !== null;
 
 let sqliteDb: sqlite3.Database | null = null;
 
-// Initialize SQLite for local development
-if (!isVercel) {
+// Initialize SQLite for local development (when no Postgres)
+if (!isPostgres) {
   const dbPath = path.join(process.cwd(), 'email_stats.db');
   const dbDir = path.dirname(dbPath);
   if (!fs.existsSync(dbDir)) {
@@ -30,12 +39,14 @@ if (!isVercel) {
   sqliteDb = new sqlite3.Database(dbPath, (err) => {
     if (err) {
       console.error('SQLite connection error:', err);
+    } else {
+      console.log('Connected to SQLite');
     }
   });
 }
 
 export function initializeDatabase(): Promise<void> {
-  if (isVercel) {
+  if (isPostgres) {
     return initializePostgres();
   } else {
     return initializeSQLite();
@@ -43,9 +54,12 @@ export function initializeDatabase(): Promise<void> {
 }
 
 async function initializePostgres(): Promise<void> {
+  if (!pool) throw new Error('Postgres pool not initialized');
+
+  const client = await pool.connect();
   try {
     // Create auth_users table
-    await sql`
+    await client.query(`
       CREATE TABLE IF NOT EXISTS auth_users (
         id SERIAL PRIMARY KEY,
         email TEXT UNIQUE NOT NULL,
@@ -54,20 +68,20 @@ async function initializePostgres(): Promise<void> {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
-    `;
+    `);
 
     // Create users table
-    await sql`
+    await client.query(`
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
         email TEXT UNIQUE NOT NULL,
         user_name TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
-    `;
+    `);
 
     // Create daily_stats table
-    await sql`
+    await client.query(`
       CREATE TABLE IF NOT EXISTS daily_stats (
         id SERIAL PRIMARY KEY,
         user_id INTEGER NOT NULL REFERENCES users(id),
@@ -82,17 +96,16 @@ async function initializePostgres(): Promise<void> {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         UNIQUE(user_id, date)
       )
-    `;
+    `);
 
     // Create index
-    await sql`
+    await client.query(`
       CREATE INDEX IF NOT EXISTS idx_date ON daily_stats(date)
-    `;
+    `);
 
-    console.log('PostgreSQL database initialized successfully');
-  } catch (error) {
-    console.error('PostgreSQL initialization error:', error);
-    throw error;
+    console.log('PostgreSQL database initialized');
+  } finally {
+    client.release();
   }
 }
 
@@ -105,21 +118,16 @@ function initializeSQLite(): Promise<void> {
 
     let completedTasks = 0;
     let errorOccurred = false;
-    let resolved = false;
     const totalTasks = 4;
 
     const timeout = setTimeout(() => {
-      if (!resolved) {
-        resolved = true;
-        console.warn('SQLite initialization timeout - resolving anyway');
-        resolve();
-      }
+      console.warn('SQLite initialization timeout');
+      resolve();
     }, 10000);
 
     const checkComplete = () => {
       completedTasks++;
-      if (completedTasks === totalTasks && !errorOccurred && !resolved) {
-        resolved = true;
+      if (completedTasks === totalTasks && !errorOccurred) {
         clearTimeout(timeout);
         resolve();
       }
@@ -129,11 +137,8 @@ function initializeSQLite(): Promise<void> {
       if (err && !err.message.includes('already exists')) {
         console.error(`SQLite initialization error in ${task}:`, err);
         errorOccurred = true;
-        if (!resolved) {
-          resolved = true;
-          clearTimeout(timeout);
-          reject(err);
-        }
+        clearTimeout(timeout);
+        reject(err);
       } else {
         checkComplete();
       }
@@ -141,34 +146,29 @@ function initializeSQLite(): Promise<void> {
 
     sqliteDb!.serialize(() => {
       sqliteDb!.run(
-        `
-        CREATE TABLE IF NOT EXISTS auth_users (
+        `CREATE TABLE IF NOT EXISTS auth_users (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           email TEXT UNIQUE NOT NULL,
           password_hash TEXT NOT NULL,
           name TEXT,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-      `,
+        )`,
         (err) => handleError(err, 'auth_users')
       );
 
       sqliteDb!.run(
-        `
-        CREATE TABLE IF NOT EXISTS users (
+        `CREATE TABLE IF NOT EXISTS users (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           email TEXT UNIQUE NOT NULL,
           user_name TEXT,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-      `,
+        )`,
         (err) => handleError(err, 'users')
       );
 
       sqliteDb!.run(
-        `
-        CREATE TABLE IF NOT EXISTS daily_stats (
+        `CREATE TABLE IF NOT EXISTS daily_stats (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           user_id INTEGER NOT NULL,
           date TEXT NOT NULL,
@@ -182,8 +182,7 @@ function initializeSQLite(): Promise<void> {
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           FOREIGN KEY (user_id) REFERENCES users(id),
           UNIQUE(user_id, date)
-        )
-      `,
+        )`,
         (err) => handleError(err, 'daily_stats')
       );
 
@@ -194,12 +193,8 @@ function initializeSQLite(): Promise<void> {
   });
 }
 
-export function getDatabase(): sqlite3.Database | null {
-  return sqliteDb;
-}
-
 export async function runQuery<T>(sql_query: string, params: any[] = []): Promise<T[]> {
-  if (isVercel) {
+  if (isPostgres) {
     return runQueryPostgres<T>(sql_query, params);
   } else {
     return runQuerySQLite<T>(sql_query, params);
@@ -207,16 +202,10 @@ export async function runQuery<T>(sql_query: string, params: any[] = []): Promis
 }
 
 async function runQueryPostgres<T>(sql_query: string, params: any[]): Promise<T[]> {
-  try {
-    // Build parameterized query for PostgreSQL
-    let pgQuery = sql_query;
-    let paramIndex = 1;
-    while (pgQuery.includes('?')) {
-      pgQuery = pgQuery.replace('?', `$${paramIndex}`);
-      paramIndex++;
-    }
+  if (!pool) throw new Error('Postgres pool not initialized');
 
-    const result = await sql.query(pgQuery, params);
+  try {
+    const result = await pool.query(sql_query, params);
     return result.rows as T[];
   } catch (error) {
     console.error('PostgreSQL query error:', error);
@@ -238,7 +227,7 @@ function runQuerySQLite<T>(sql_query: string, params: any[]): Promise<T[]> {
 }
 
 export async function runQuerySingle<T>(sql_query: string, params: any[] = []): Promise<T | null> {
-  if (isVercel) {
+  if (isPostgres) {
     return runQuerySinglePostgres<T>(sql_query, params);
   } else {
     return runQuerySingleSQLite<T>(sql_query, params);
@@ -246,15 +235,10 @@ export async function runQuerySingle<T>(sql_query: string, params: any[] = []): 
 }
 
 async function runQuerySinglePostgres<T>(sql_query: string, params: any[]): Promise<T | null> {
-  try {
-    let pgQuery = sql_query;
-    let paramIndex = 1;
-    while (pgQuery.includes('?')) {
-      pgQuery = pgQuery.replace('?', `$${paramIndex}`);
-      paramIndex++;
-    }
+  if (!pool) throw new Error('Postgres pool not initialized');
 
-    const result = await sql.query(pgQuery, params);
+  try {
+    const result = await pool.query(sql_query, params);
     return (result.rows[0] as T) || null;
   } catch (error) {
     console.error('PostgreSQL query error:', error);
@@ -279,7 +263,7 @@ export async function executeQuery(
   sql_query: string,
   params: any[] = []
 ): Promise<{ lastID: number; changes: number }> {
-  if (isVercel) {
+  if (isPostgres) {
     return executeQueryPostgres(sql_query, params);
   } else {
     return executeQuerySQLite(sql_query, params);
@@ -290,15 +274,10 @@ async function executeQueryPostgres(
   sql_query: string,
   params: any[]
 ): Promise<{ lastID: number; changes: number }> {
-  try {
-    let pgQuery = sql_query;
-    let paramIndex = 1;
-    while (pgQuery.includes('?')) {
-      pgQuery = pgQuery.replace('?', `$${paramIndex}`);
-      paramIndex++;
-    }
+  if (!pool) throw new Error('Postgres pool not initialized');
 
-    const result = await sql.query(pgQuery, params);
+  try {
+    const result = await pool.query(sql_query, params);
     return { lastID: 0, changes: result.rowCount || 0 };
   } catch (error) {
     console.error('PostgreSQL execute error:', error);
@@ -320,23 +299,4 @@ function executeQuerySQLite(
       else resolve({ lastID: this.lastID, changes: this.changes });
     });
   });
-}
-
-// Helper to convert SQLite syntax to PostgreSQL
-function convertSQLiteToPostgres(query: string, params: any[]): string {
-  // Replace ? placeholders with $1, $2, etc for PostgreSQL
-  let pgQuery = query;
-  let paramIndex = 1;
-  while (pgQuery.includes('?')) {
-    pgQuery = pgQuery.replace('?', `$${paramIndex}`);
-    paramIndex++;
-  }
-
-  // Replace SQLite-specific syntax
-  pgQuery = pgQuery.replace(/AUTOINCREMENT/gi, '');
-  pgQuery = pgQuery.replace(/INTEGER PRIMARY KEY/gi, 'SERIAL PRIMARY KEY');
-  pgQuery = pgQuery.replace(/DATETIME DEFAULT CURRENT_TIMESTAMP/gi, 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP');
-  pgQuery = pgQuery.replace(/UNIQUE\(/gi, 'UNIQUE(');
-
-  return pgQuery;
 }
