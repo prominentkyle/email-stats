@@ -93,23 +93,37 @@ export default async function handler(
           console.log(`Created new user: ${stat.email} with ID ${user.id}`);
         }
 
-        // Insert or update daily stats
-        const insertResult = await executeQuery(
-          `INSERT OR REPLACE INTO daily_stats
-          (user_id, date, total_emails, emails_sent, emails_received, files_edited, files_viewed, gmail_imap_last_used, gmail_web_last_used)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            user.id,
-            stat.date,
-            stat.totalEmails,
-            stat.emailsSent,
-            stat.emailsReceived,
-            stat.filesEdited,
-            stat.filesViewed,
-            stat.gmailImapLastUsed,
-            stat.gmailWebLastUsed,
-          ]
-        );
+        // Determine if using Postgres or SQLite
+        const isPostgres = process.env.POSTGRES_URL || process.env.POSTGRES_PRISMA_URL || process.env.DATABASE_URL;
+
+        // Use different upsert syntax based on database type
+        const upsertQuery = isPostgres
+          ? `INSERT INTO daily_stats
+            (user_id, date, total_emails, emails_sent, emails_received, files_edited, files_viewed, gmail_imap_last_used, gmail_web_last_used)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (user_id, date) DO UPDATE SET
+            total_emails = EXCLUDED.total_emails,
+            emails_sent = EXCLUDED.emails_sent,
+            emails_received = EXCLUDED.emails_received,
+            files_edited = EXCLUDED.files_edited,
+            files_viewed = EXCLUDED.files_viewed,
+            gmail_imap_last_used = EXCLUDED.gmail_imap_last_used,
+            gmail_web_last_used = EXCLUDED.gmail_web_last_used`
+          : `INSERT OR REPLACE INTO daily_stats
+            (user_id, date, total_emails, emails_sent, emails_received, files_edited, files_viewed, gmail_imap_last_used, gmail_web_last_used)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
+        const insertResult = await executeQuery(upsertQuery, [
+          user.id,
+          stat.date,
+          stat.totalEmails,
+          stat.emailsSent,
+          stat.emailsReceived,
+          stat.filesEdited,
+          stat.filesViewed,
+          stat.gmailImapLastUsed,
+          stat.gmailWebLastUsed,
+        ]);
         insertedCount++;
         console.log(`Inserted data for ${stat.email} on ${stat.date}: ${stat.totalEmails} emails`);
       } catch (error) {
