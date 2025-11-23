@@ -15,10 +15,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const password = 'admin123';
     const passwordHash = hashSync(password, 10);
 
-    await executeQuery(
-      `INSERT OR IGNORE INTO auth_users (email, password_hash, name) VALUES (?, ?, ?)`,
-      [email, passwordHash, 'Admin User']
-    );
+    // Use different syntax based on database type
+    const isPostgres = process.env.POSTGRES_URL || process.env.POSTGRES_PRISMA_URL || process.env.DATABASE_URL;
+
+    const insertQuery = isPostgres
+      ? `INSERT INTO auth_users (email, password_hash, name) VALUES (?, ?, ?) ON CONFLICT (email) DO NOTHING`
+      : `INSERT OR IGNORE INTO auth_users (email, password_hash, name) VALUES (?, ?, ?)`;
+
+    await executeQuery(insertQuery, [email, passwordHash, 'Admin User']);
 
     res.status(200).json({
       success: true,
