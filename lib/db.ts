@@ -18,6 +18,43 @@ const db = new sqlite3.Database(dbPath, (err) => {
 
 export function initializeDatabase(): Promise<void> {
   return new Promise((resolve, reject) => {
+    let completedTasks = 0;
+    let errorOccurred = false;
+    let resolved = false;
+    const totalTasks = 4; // 4 table creations + 1 index
+
+    // Timeout after 10 seconds to prevent hanging
+    const timeout = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        console.warn('Database initialization timeout - resolving anyway');
+        resolve();
+      }
+    }, 10000);
+
+    const checkComplete = () => {
+      completedTasks++;
+      if (completedTasks === totalTasks && !errorOccurred && !resolved) {
+        resolved = true;
+        clearTimeout(timeout);
+        resolve();
+      }
+    };
+
+    const handleError = (err: Error | null, task: string) => {
+      if (err && !err.message.includes('already exists')) {
+        console.error(`DB initialization error in ${task}:`, err);
+        errorOccurred = true;
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timeout);
+          reject(err);
+        }
+      } else {
+        checkComplete();
+      }
+    };
+
     db.serialize(() => {
       // Create auth_users table for authentication
       db.run(`
@@ -29,9 +66,7 @@ export function initializeDatabase(): Promise<void> {
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
-      `, (err) => {
-        if (err && !err.message.includes('already exists')) reject(err);
-      });
+      `, (err) => handleError(err, 'auth_users'));
 
       // Create users table (for email stats data)
       db.run(`
@@ -41,9 +76,7 @@ export function initializeDatabase(): Promise<void> {
           user_name TEXT,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
-      `, (err) => {
-        if (err && !err.message.includes('already exists')) reject(err);
-      });
+      `, (err) => handleError(err, 'users'));
 
       // Create daily stats table
       db.run(`
@@ -62,15 +95,10 @@ export function initializeDatabase(): Promise<void> {
           FOREIGN KEY (user_id) REFERENCES users(id),
           UNIQUE(user_id, date)
         )
-      `, (err) => {
-        if (err && !err.message.includes('already exists')) reject(err);
-      });
+      `, (err) => handleError(err, 'daily_stats'));
 
       // Create index for faster queries
-      db.run(`CREATE INDEX IF NOT EXISTS idx_date ON daily_stats(date)`, (err) => {
-        if (err) reject(err);
-        else resolve();
-      });
+      db.run(`CREATE INDEX IF NOT EXISTS idx_date ON daily_stats(date)`, (err) => handleError(err, 'index'));
     });
   });
 }
