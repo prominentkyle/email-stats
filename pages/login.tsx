@@ -194,18 +194,6 @@ export default function LoginPage() {
             </button>
           </form>
 
-          <p
-            style={{
-              fontSize: 'var(--text-xs)',
-              color: 'var(--text-muted)',
-              textAlign: 'center',
-              marginTop: 'var(--sp-24)',
-            }}
-          >
-            Default credentials for testing:<br />
-            Email: admin@example.com<br />
-            Password: admin123
-          </p>
         </div>
       </main>
     </>

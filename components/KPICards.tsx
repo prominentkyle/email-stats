@@ -49,39 +49,30 @@ export default function KPICards({ statsData, summaryData }: KPICardsProps) {
       }
     );
 
-    // Calculate deltas (compare to average daily)
-    const avgDaily = summaryData.length > 0 ? summaryData[0] : null;
-    const deltaPercent = (current: number, avg: number | undefined) => {
-      if (!avg || avg === 0) return 0;
-      return Math.round(((current - avg) / avg) * 100);
-    };
+    // Calculate active users (only users who sent emails)
+    const activeUsersCount = Array.from(userMap.values()).filter(
+      (user) => (user.emails_sent || 0) > 0
+    ).length;
 
     return [
       {
         label: 'Total Emails',
         value: totals.total_emails,
-        delta: deltaPercent(
-          totals.total_emails,
-          avgDaily?.total_emails
-        ),
         icon: '📧',
       },
       {
         label: 'Emails Sent',
         value: totals.emails_sent,
-        delta: deltaPercent(totals.emails_sent, avgDaily?.total_sent),
         icon: '📤',
       },
       {
         label: 'Emails Received',
         value: totals.emails_received,
-        delta: deltaPercent(totals.emails_received, avgDaily?.total_received),
         icon: '📥',
       },
       {
         label: 'Active Users',
-        value: userMap.size,
-        delta: 0,
+        value: activeUsersCount,
         icon: '👥',
       },
     ];
@@ -118,11 +109,6 @@ export default function KPICards({ statsData, summaryData }: KPICardsProps) {
     marginBottom: 'var(--sp-8)',
   };
 
-  const deltaStyle = (delta: number): React.CSSProperties => ({
-    fontSize: 'var(--text-sm)',
-    color: delta > 0 ? 'var(--status-positive)' : delta < 0 ? 'var(--status-negative)' : 'var(--text-muted)',
-    fontWeight: 500,
-  });
 
   return (
     <div
@@ -142,11 +128,6 @@ export default function KPICards({ statsData, summaryData }: KPICardsProps) {
             </div>
             <div style={valueStyle}>{metric.value.toLocaleString()}</div>
           </div>
-          {metric.delta !== 0 && (
-            <div style={deltaStyle(metric.delta)}>
-              {metric.delta > 0 ? '↑' : '↓'} {Math.abs(metric.delta)}% vs avg
-            </div>
-          )}
         </div>
       ))}
     </div>

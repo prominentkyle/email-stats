@@ -7,13 +7,13 @@ const db = new sqlite3.Database(dbPath);
 
 const users = [
   {
-    email: 'kyle@cabletiesunlimited.com',
-    password: 'admin123!@#',
+    email: 'Kyle@cabletiesunlimited.com',
+    password: 'admin123',
     name: 'Kyle'
   },
   {
     email: 'scott@cabletiesunlimited.com',
-    password: 'admin123!@#',
+    password: 'admin123',
     name: 'Scott'
   }
 ];
